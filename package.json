@@ -1,0 +1,39 @@
+{
+  "name": "opencode-session-analyzer",
+  "version": "0.1.0",
+  "description": "An OpenCode plugin for analyzing historical sessions and writing stable JSON artifacts.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "session",
+    "analyzer",
+    "llm"
+  ],
+  "files": [
+    "index.ts",
+    "src/",
+    ".opencode/plugins/",
+    ".opencode/commands/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "latest"
+  }
+}
