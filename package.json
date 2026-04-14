@@ -4,6 +4,14 @@
   "description": "An OpenCode plugin for analyzing historical sessions and writing stable JSON artifacts.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aahljhljhlj-ux/opencode-session-analyzer.git"
+  },
+  "homepage": "https://github.com/aahljhljhlj-ux/opencode-session-analyzer#readme",
+  "bugs": {
+    "url": "https://github.com/aahljhljhlj-ux/opencode-session-analyzer/issues"
+  },
   "main": "./index.ts",
   "exports": {
     ".": "./index.ts"
