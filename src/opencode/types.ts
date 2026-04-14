@@ -206,6 +206,7 @@ export interface ProjectSummary {
   correctionPatterns: Array<{ value: string; count: number }>
   activeFindings: string[]
   suggestions: string[]
+  ruleSuggestions: RuleSuggestionArtifact[]
 }
 
 export interface GlobalSummary {
@@ -222,6 +223,20 @@ export interface GlobalSummary {
   commonPromptHabits: Array<{ value: string; count: number }>
   commonWorkflowFriction: Array<{ value: string; count: number }>
   suggestions: string[]
+  ruleSuggestions: RuleSuggestionArtifact[]
+}
+
+export interface RuleSuggestionArtifact {
+  summary: string
+  recommendedScope: "project" | "global"
+  confidence: "high" | "medium" | "low"
+  reason: string
+  evidenceRefs: string[]
+  suggestionValidFrom: string | null
+  suggestionValidTo: string | null
+  conflictScope: "project" | "global" | null
+  conflictReason: string | null
+  conflictingRuleText: string | null
 }
 
 export interface AnalyzeCommandOptions {
@@ -315,8 +330,13 @@ export interface RuleCandidateDecision {
   confidence: "high" | "medium" | "low"
   reason: string
   evidenceRefs: string[]
+  suggestionValidFrom: string | null
+  suggestionValidTo: string | null
   alreadyCovered: boolean
   matchedRuleText: string | null
+  conflictScope: "project" | "global" | null
+  conflictReason: string | null
+  conflictingRuleText: string | null
 }
 
 export interface RuleSuggestionPrompt {

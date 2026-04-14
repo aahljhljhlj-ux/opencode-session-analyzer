@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { runSessionAnalyzer } from "../src/opencode/analyze"
@@ -639,6 +639,93 @@ describe("runSessionAnalyzer core flow", () => {
       expect(result.ruleSuggestionPrompt?.targetSuggestions[0]?.reason).toMatch(/[\u4e00-\u9fff]/)
       expect(result.ruleSuggestionPrompt?.promptText).toContain("建议写入：当前项目 AGENTS.md")
       expect(result.ruleSuggestionPrompt?.promptText).toContain("原因：")
+    } finally {
+      await rm(baseDir, { recursive: true, force: true })
+    }
+  })
+
+  it("surfaces possible conflicts with existing AGENTS rules", async () => {
+    const sessionId = "s-conflict"
+    const t0 = Date.now() - 1000
+    const baseDir = await mkdtemp(path.join(os.tmpdir(), "session-analyzer-"))
+    const client = makeClient({
+      sessions: [{ id: sessionId, updatedAt: iso(t0), projectPath: "D:/proj" }],
+      messagesBySession: {
+        [sessionId]: [
+          {
+            info: { id: "m1", role: "user", time: { created: iso(t0) } },
+            parts: [{ type: "text", text: "请详细分析这个工作流并给出改进建议。".repeat(40) }],
+          },
+        ],
+      },
+    })
+    client.session.prompt.mockResolvedValueOnce({
+      data: {
+        info: {
+          structured_output: {
+            findings: [],
+            currentRecommendations: [],
+            workflowSuggestions: [
+              {
+                summary: "当提示词偏长时，更早明确目标文件和预期结果，减少来回确认。",
+                scope: "project",
+                validFrom: iso(t0),
+                validTo: null,
+                evidenceRefs: ["m1"],
+              },
+            ],
+          },
+        },
+      },
+    })
+    client.session.prompt.mockResolvedValueOnce({
+      data: {
+        info: {
+          structured_output: {
+            recommendedScope: "project",
+            confidence: "high",
+            reason: "这条建议直接约束当前项目中提示词写法与分析输入质量，更适合落到当前项目规则。",
+          },
+        },
+      },
+    })
+    client.session.prompt.mockResolvedValueOnce({
+      data: {
+        info: {
+          structured_output: {
+            status: "conflict",
+            confidence: "high",
+            ruleIndex: 0,
+            reason: "现有规则要求在开始前先确认目标文件，这与新建议要求更早明确目标文件和结果可能引起执行冲突。",
+          },
+        },
+      },
+    })
+
+    await writeFile(path.join(baseDir, "AGENTS.md"), "- 未确认目标文件前不要开始实现。\n")
+
+    try {
+      const result = await runSessionAnalyzer({
+        client,
+        directory: baseDir,
+        options: { recent: null, project: null, session: sessionId, force: false, onlyStale: false },
+      })
+
+      expect(result.ruleSuggestionPrompt).not.toBeNull()
+      expect(result.ruleSuggestionPrompt?.targetSuggestions).toHaveLength(1)
+      expect(result.ruleSuggestionPrompt?.targetSuggestions[0]?.conflictScope).toBe("project")
+      expect(result.ruleSuggestionPrompt?.targetSuggestions[0]?.conflictReason).toContain("执行冲突")
+      expect(result.ruleSuggestionPrompt?.targetSuggestions[0]?.conflictingRuleText).toContain("未确认目标文件前不要开始实现")
+      expect(result.ruleSuggestionPrompt?.promptText).toContain("与现有规则可能冲突：当前项目 AGENTS.md")
+      expect(result.ruleSuggestionPrompt?.promptText).toContain("冲突说明：")
+      expect(result.ruleSuggestionPrompt?.promptText).toContain("建议依据时间：")
+
+      const projectSummaryRaw = await readFile(result.projectSummaryPath, "utf8")
+      const projectSummary = JSON.parse(projectSummaryRaw)
+      expect(projectSummary.ruleSuggestions).toHaveLength(1)
+      expect(projectSummary.ruleSuggestions[0].conflictScope).toBe("project")
+      expect(projectSummary.ruleSuggestions[0].conflictReason).toContain("执行冲突")
+      expect(projectSummary.ruleSuggestions[0].conflictingRuleText).toContain("未确认目标文件前不要开始实现")
     } finally {
       await rm(baseDir, { recursive: true, force: true })
     }

@@ -26,8 +26,6 @@
   "files": [
     "index.ts",
     "src/",
-    ".opencode/plugins/",
-    ".opencode/commands/",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"

@@ -14,6 +14,7 @@ import type {
   GlobalSummary,
   ProjectSummary,
   RuleCandidateDecision,
+  RuleSuggestionArtifact,
   RuleSuggestionPrompt,
   SessionCandidate,
   SessionSummary,
@@ -152,6 +153,19 @@ export async function runSessionAnalyzer(args: {
   const projectSummary = buildProjectSummary(summaries, now)
   const globalSummary = buildGlobalSummary(summaries, now)
 
+  const ruleSuggestionPrompt = await buildRuleSuggestionPrompt({
+    client,
+    directory,
+    projectSummary,
+    globalSummary,
+    summaries,
+    analyzedSessionCount: analyzedSessions.length,
+    failedSessions,
+  })
+
+  projectSummary.ruleSuggestions = buildRuleSuggestionArtifacts(ruleSuggestionPrompt?.targetSuggestions ?? [], "project")
+  globalSummary.ruleSuggestions = buildRuleSuggestionArtifacts(ruleSuggestionPrompt?.targetSuggestions ?? [], "global")
+
   await writeProjectSummary(storage.projectSummaryPath, projectSummary)
   await writeGlobalSummary(storage.globalSummaryPath, globalSummary)
   index.lastRunAt = now
@@ -172,16 +186,6 @@ export async function runSessionAnalyzer(args: {
   await publishProgress({
     phase: "finished",
     total: totalEligibleSessions,
-  })
-
-  const ruleSuggestionPrompt = await buildRuleSuggestionPrompt({
-    client,
-    directory,
-    projectSummary,
-    globalSummary,
-    summaries,
-    analyzedSessionCount: analyzedSessions.length,
-    failedSessions,
   })
 
   return {
@@ -659,6 +663,7 @@ function buildProjectSummary(summaries: SessionSummary[], generatedAt: string): 
     ),
     activeFindings: projectFindings.slice(0, 5).map((finding) => finding.summary),
     suggestions: mergeTextValues(projectRecommendations.map((item) => item.summary), 10, buildSuggestions(projectSummaries)),
+    ruleSuggestions: [],
   }
 }
 
@@ -685,7 +690,28 @@ function buildGlobalSummary(summaries: SessionSummary[], generatedAt: string): G
       summaries.flatMap((summary) => summary.signals.correctionSignals.map((signal) => ({ value: signal.type, count: 1 }))),
     ),
     suggestions: mergeTextValues(recommendations.map((item) => item.summary), 10, buildSuggestions(summaries)),
+    ruleSuggestions: [],
   }
+}
+
+function buildRuleSuggestionArtifacts(
+  decisions: RuleCandidateDecision[],
+  targetScope: "project" | "global",
+): RuleSuggestionArtifact[] {
+  return decisions
+    .filter((decision) => decision.recommendedScope === targetScope)
+    .map((decision) => ({
+      summary: decision.summary,
+      recommendedScope: decision.recommendedScope,
+      confidence: decision.confidence,
+      reason: decision.reason,
+      evidenceRefs: decision.evidenceRefs,
+      suggestionValidFrom: decision.suggestionValidFrom,
+      suggestionValidTo: decision.suggestionValidTo,
+      conflictScope: decision.conflictScope,
+      conflictReason: decision.conflictReason,
+      conflictingRuleText: decision.conflictingRuleText,
+    }))
 }
 
 function collectFindings(summaries: SessionSummary[]) {
@@ -846,16 +872,28 @@ async function collectUncoveredRuleDecisions(args: {
     }),
   ])
 
-  return filterUncoveredRuleDecisions(decisions, agentFiles)
+  return filterUncoveredRuleDecisions({
+    client,
+    decisions,
+    agentFiles,
+  })
 }
 
-function filterUncoveredRuleDecisions(
-  decisions: RuleCandidateDecision[],
-  agentFiles: { projectAgentsText: string; globalAgentsText: string },
-): RuleCandidateDecision[] {
-  return decisions
+async function filterUncoveredRuleDecisions(args: {
+  client: any
+  decisions: RuleCandidateDecision[]
+  agentFiles: { projectAgentsText: string; globalAgentsText: string }
+}): Promise<RuleCandidateDecision[]> {
+  const { client, decisions, agentFiles } = args
+  const uncoveredDecisions = decisions
     .map((decision) => applyCoverageToDecision(decision, agentFiles))
     .filter((decision) => !decision.alreadyCovered)
+
+  return Promise.all(uncoveredDecisions.map((decision) => applyConflictToDecision({
+    client,
+    decision,
+    agentFiles,
+  })))
 }
 
 function buildRuleSuggestionPromptText(uncoveredDecisions: RuleCandidateDecision[]): string {
@@ -867,7 +905,11 @@ function buildRuleSuggestionPromptText(uncoveredDecisions: RuleCandidateDecision
       `${index + 1}. ${decision.summary}`,
       `建议写入：${decision.recommendedScope === "project" ? "当前项目 AGENTS.md" : "全局 AGENTS.md"}`,
       `原因：${decision.reason}`,
-    ].join("\n")),
+      decision.suggestionValidFrom ? `建议依据时间：${decision.suggestionValidFrom}${decision.suggestionValidTo ? ` 至 ${decision.suggestionValidTo}` : " 起"}` : null,
+      decision.conflictScope ? `与现有规则可能冲突：${decision.conflictScope === "project" ? "当前项目 AGENTS.md" : "全局 AGENTS.md"}` : null,
+      decision.conflictReason ? `冲突说明：${decision.conflictReason}` : null,
+      decision.conflictingRuleText ? `冲突规则：${decision.conflictingRuleText}` : null,
+    ].filter((line): line is string => Boolean(line)).join("\n")),
     "",
     "如确认无误，我将按上述“建议写入”位置自动写入规则。",
   ].join("\n")
@@ -986,8 +1028,13 @@ async function classifyRuleCandidate(args: {
       confidence: parsed.confidence,
       reason: parsed.reason,
       evidenceRefs,
+      suggestionValidFrom: summary?.validFrom ?? null,
+      suggestionValidTo: summary?.validTo ?? null,
       alreadyCovered: false,
       matchedRuleText: null,
+      conflictScope: null,
+      conflictReason: null,
+      conflictingRuleText: null,
     }
   } catch {
     return deterministicRuleCandidateDecision(candidateText, summary)
@@ -1018,8 +1065,13 @@ function deterministicRuleCandidateDecision(candidateText: string, summary: Sess
       ? "这条建议明显依赖当前仓库的命令、验证方式或本地约束，更适合写入当前项目规则。"
       : "这条建议更像可跨项目复用的通用协作习惯，更适合写入全局规则。",
     evidenceRefs,
+    suggestionValidFrom: summary?.validFrom ?? null,
+    suggestionValidTo: summary?.validTo ?? null,
     alreadyCovered: false,
     matchedRuleText: null,
+    conflictScope: null,
+    conflictReason: null,
+    conflictingRuleText: null,
   }
 }
 
@@ -1132,6 +1184,209 @@ function applyCoverageToDecision(
   }
 }
 
+async function applyConflictToDecision(args: {
+  client: any
+  decision: RuleCandidateDecision
+  agentFiles: { projectAgentsText: string; globalAgentsText: string }
+}): Promise<RuleCandidateDecision> {
+  const { client, decision, agentFiles } = args
+  const conflict = await classifyRuleConflict({
+    client,
+    decision,
+    projectAgentsText: agentFiles.projectAgentsText,
+    globalAgentsText: agentFiles.globalAgentsText,
+  })
+
+  if (!conflict) {
+    return decision
+  }
+
+  return {
+    ...decision,
+    conflictScope: conflict.scope,
+    conflictReason: conflict.reason,
+    conflictingRuleText: conflict.ruleText,
+  }
+}
+
+async function classifyRuleConflict(args: {
+  client: any
+  decision: RuleCandidateDecision
+  projectAgentsText: string
+  globalAgentsText: string
+}): Promise<{ scope: "project" | "global"; reason: string; ruleText: string | null } | null> {
+  const { client, decision, projectAgentsText, globalAgentsText } = args
+  const scopeCandidates: Array<{ scope: "project" | "global"; rules: string[] }> = [
+    { scope: "project", rules: pickRelevantAgentRules(decision.summary, projectAgentsText) },
+    { scope: "global", rules: pickRelevantAgentRules(decision.summary, globalAgentsText) },
+  ]
+
+  for (const scopeCandidate of scopeCandidates) {
+    if (scopeCandidate.rules.length === 0) {
+      continue
+    }
+
+    const conflict = await classifyRuleConflictAgainstScope({
+      client,
+      decision,
+      scope: scopeCandidate.scope,
+      existingRules: scopeCandidate.rules,
+    })
+
+    if (conflict) {
+      return conflict
+    }
+  }
+
+  return null
+}
+
+function pickRelevantAgentRules(candidateText: string, agentsText: string): string[] {
+  const normalizedCandidate = normalizeRuleText(candidateText)
+  if (!normalizedCandidate || !agentsText.trim()) {
+    return []
+  }
+
+  const paragraphs = agentsText
+    .split(/\r?\n\r?\n+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+  const ranked = paragraphs
+    .map((entry) => ({
+      text: entry,
+      score: computeTokenOverlap(normalizedCandidate, normalizeRuleText(entry)),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.text.length - right.text.length)
+
+  if (ranked.length > 0) {
+    return ranked.slice(0, 6).map((entry) => entry.text)
+  }
+
+  return paragraphs.slice(0, 6)
+}
+
+async function classifyRuleConflictAgainstScope(args: {
+  client: any
+  decision: RuleCandidateDecision
+  scope: "project" | "global"
+  existingRules: string[]
+}): Promise<{ scope: "project" | "global"; reason: string; ruleText: string | null } | null> {
+  const { client, decision, scope, existingRules } = args
+  const tempSession = await client.session.create({
+    body: {
+      title: "Session Analyzer Rule Conflict Classifier",
+    },
+  })
+  const tempSessionId = tempSession?.data?.id
+  if (!tempSessionId) {
+    return null
+  }
+
+  const promptText = buildRuleConflictPromptText({
+    decision,
+    scope,
+    existingRules,
+  })
+
+  try {
+    const response = await client.session.prompt({
+      path: { id: tempSessionId },
+      body: {
+        noReply: false,
+        parts: [{ type: "text", text: promptText }],
+        format: {
+          type: "json_schema",
+          retryCount: 2,
+          schema: ruleConflictDecisionSchema,
+        },
+      },
+    })
+
+    const parsed = parseRuleConflictDecisionResponse(response)
+    if (parsed.status !== "conflict" || parsed.confidence === "low") {
+      return null
+    }
+
+    const ruleText = parsed.ruleIndex !== null ? existingRules[parsed.ruleIndex] ?? null : null
+
+    return {
+      scope,
+      reason: parsed.reason,
+      ruleText,
+    }
+  } catch {
+    return null
+  } finally {
+    await client.session.delete({ path: { id: tempSessionId } }).catch(() => undefined)
+  }
+}
+
+function buildRuleConflictPromptText(args: {
+  decision: RuleCandidateDecision
+  scope: "project" | "global"
+  existingRules: string[]
+}): string {
+  const { decision, scope, existingRules } = args
+
+  return [
+    "你正在判断一条新的工作建议是否与现有 AGENTS.md 规则产生语义冲突。",
+    "只返回符合 schema 的结构化 JSON。",
+    "只有在遵循新建议会明显违反现有规则，或遵循现有规则会明显否定新建议时，才标记为 conflict。",
+    "如果现有规则只是更泛化、更具体、更严格，或可以同时成立，不算 conflict。",
+    "建议证据时间可用于说明这条建议来自较新的观察，但不能据此自动覆盖旧规则。",
+    "reason 请用简体中文，直接说明为什么冲突或为什么不冲突。",
+    JSON.stringify({
+      candidateSuggestion: {
+        summary: decision.summary,
+        recommendedScope: decision.recommendedScope,
+        suggestionValidFrom: decision.suggestionValidFrom,
+        suggestionValidTo: decision.suggestionValidTo,
+        evidenceRefs: decision.evidenceRefs,
+      },
+      existingRuleScope: scope,
+      existingRules: existingRules.map((text, index) => ({ index, text })),
+    }, null, 2),
+  ].join("\n\n")
+}
+
+const ruleConflictDecisionSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: { type: "string", enum: ["conflict", "none", "unsure"] },
+    confidence: { type: "string", enum: ["high", "medium", "low"] },
+    ruleIndex: { type: ["integer", "null"], minimum: 0 },
+    reason: { type: "string" },
+  },
+  required: ["status", "confidence", "ruleIndex", "reason"],
+} as const
+
+function parseRuleConflictDecisionResponse(response: any): {
+  status: "conflict" | "none" | "unsure"
+  confidence: "high" | "medium" | "low"
+  ruleIndex: number | null
+  reason: string
+} {
+  const structured = response?.data?.info?.structured_output ?? response?.data?.info?.structured
+  const record = structured && typeof structured === "object" ? structured as Record<string, unknown> : null
+  const rawRuleIndex = typeof record?.ruleIndex === "number" && Number.isInteger(record.ruleIndex)
+    ? record.ruleIndex
+    : null
+
+  return {
+    status: record?.status === "conflict" || record?.status === "none" || record?.status === "unsure"
+      ? record.status
+      : "unsure",
+    confidence: record?.confidence === "high" || record?.confidence === "medium" || record?.confidence === "low"
+      ? record.confidence
+      : "low",
+    ruleIndex: rawRuleIndex,
+    reason: typeof record?.reason === "string" && record.reason.trim() ? record.reason.trim() : "现有规则与新建议的关系不够明确。",
+  }
+}
+
 function findCoveredRuleText(candidateText: string, agentsText: string): string | null {
   const normalizedCandidate = normalizeRuleText(candidateText)
   if (!normalizedCandidate || !agentsText.trim()) {
@@ -1166,7 +1421,7 @@ function normalizeRuleText(text: string): string {
   return text
     .toLowerCase()
     .replace(/`+/g, " ")
-    .replace(/[^a-z0-9\s\\./_-]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s\\./_-]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim()
 }

@@ -1,4 +1,4 @@
-export const ANALYZER_VERSION = "0.2.5-mvp"
+export const ANALYZER_VERSION = "0.2.6-mvp"
 
 export const DEFAULT_PENDING_BATCH_SESSION_COUNT = 5
 
