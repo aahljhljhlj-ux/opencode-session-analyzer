@@ -32,20 +32,57 @@ Use the checked-in local plugin files in this repository:
 
 ### npm package
 
-Planned package name: `opencode-session-analyzer`
+Package name: `opencode-session-analyzer`
 
-After publishing, add the package name to your OpenCode config:
+After publishing, add both the plugin package and the command definition to your OpenCode config:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "opencode-session-analyzer"
-  ]
+  "plugin": ["opencode-session-analyzer"],
+  "command": {
+    "session-analyzer": {
+      "description": "Analyze the next 5 eligible sessions for the current project",
+      "template": "Use the `session_analyzer` tool to analyze sessions for this workspace.\n\nArguments: `$ARGUMENTS`\n\nParse the arguments into this shape and call the tool exactly once unless the call fails and needs retry:\n\n```json\n{\n  \"arguments\": \"$ARGUMENTS\"\n}\n```\n\nAfter the tool returns, summarize in Chinese and keep it concise. Report analyzed progress, newly analyzed sessions, remaining eligible sessions, output directory, and any failures. Mention `/session-analyzer --project` when more eligible sessions remain.\n\nIf the tool call fails before analysis starts because `session_analyzer` is unavailable, the plugin package failed to install, or the error looks like a permission/write/install problem: explain that OpenCode installs the npm plugin implicitly from the `plugin` config entry and users do not need to preinstall it manually; clearly state this is usually a first-run permission problem while OpenCode is trying to write the plugin package; tell the user to close OpenCode and reopen it once with administrator privileges, then retry `/session-analyzer`; say that opening OpenCode as administrator once is usually enough for it to write the package successfully; do not present the run as analyzer success in this case."
+    }
+  }
 }
 ```
 
+OpenCode installs the npm plugin automatically from the package name. Users do not need to run `npm install` manually in their project.
+
+This package is meant to be used through implicit installation from the `plugin` config entry. There is no separate preinstall step in the normal setup.
+
+On first use, OpenCode may need to write the plugin package into its own cache or config area. If that automatic install fails with a permission or write error, reopen OpenCode once with administrator privileges and retry. In practice, one elevated launch is usually enough for OpenCode to write the package successfully.
+
 The package root exports `SessionAnalyzerPlugin`, and the repository also keeps the local `.opencode` plugin and command files for development.
+
+Note: the npm plugin provides the `session_analyzer` tool, but the `/session-analyzer` slash command still needs to be defined in OpenCode config. The bundled `.opencode/commands/session-analyzer.md` is for local development in this repository and is not auto-registered when the plugin is installed from npm.
+
+Recommended command template for user-facing error handling on first run:
+
+````md
+Use the `session_analyzer` tool to analyze sessions for this workspace.
+
+Arguments: `$ARGUMENTS`
+
+Parse the arguments into this shape and call the tool exactly once unless the call fails and needs retry:
+
+```json
+{
+  "arguments": "$ARGUMENTS"
+}
+```
+
+After the tool returns, summarize in Chinese and keep it concise.
+
+If the tool call fails before analysis starts because `session_analyzer` is unavailable, the plugin package failed to install, or the error looks like a permission/write/install problem:
+- explain that OpenCode installs the npm plugin implicitly from the `plugin` config entry and users do not need to preinstall it manually
+- clearly state this is usually a first-run permission problem while OpenCode is trying to write the plugin package
+- tell the user to close OpenCode and reopen it once with administrator privileges, then retry `/session-analyzer`
+- say that opening OpenCode as administrator once is usually enough for it to write the package successfully
+- do not present the run as analyzer success in this case
+````
 
 ## Usage
 
@@ -108,6 +145,13 @@ TypeScript check:
 
 ```powershell
 node_modules\.bin\tsc -p tsconfig.json --noEmit
+```
+
+Package verification before publish:
+
+```powershell
+npm pack --dry-run
+npm pack
 ```
 
 ## Privacy

@@ -32,20 +32,57 @@
 
 ### npm 包
 
-计划发布包名：`opencode-session-analyzer`
+包名：`opencode-session-analyzer`
 
-发布后，可将包名加入 OpenCode 配置：
+发布后，需要同时把插件包和命令定义加入 OpenCode 配置：
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "opencode-session-analyzer"
-  ]
+  "plugin": ["opencode-session-analyzer"],
+  "command": {
+    "session-analyzer": {
+      "description": "默认按当前项目从最早开始分析 5 个待分析 session；可继续执行，或用 --project 分析当前项目全部待分析 session",
+      "template": "Use the `session_analyzer` tool to analyze sessions for this workspace.\n\nArguments: `$ARGUMENTS`\n\nParse the arguments into this shape and call the tool exactly once unless the call fails and needs retry:\n\n```json\n{\n  \"arguments\": \"$ARGUMENTS\"\n}\n```\n\nAfter the tool returns, summarize in Chinese and keep it concise. Report analyzed progress, newly analyzed sessions, remaining eligible sessions, output directory, and any failures. Mention `/session-analyzer --project` when more eligible sessions remain.\n\nIf the tool call fails before analysis starts because `session_analyzer` is unavailable, the plugin package failed to install, or the error looks like a permission/write/install problem: explain that OpenCode installs the npm plugin implicitly from the `plugin` config entry and users do not need to preinstall it manually; clearly state this is usually a first-run permission problem while OpenCode is trying to write the plugin package; tell the user to close OpenCode and reopen it once with administrator privileges, then retry `/session-analyzer`; say that opening OpenCode as administrator once is usually enough for it to write the package successfully; do not present the run as analyzer success in this case."
+    }
+  }
 }
 ```
 
+OpenCode 会根据包名自动隐式安装 npm 插件，用户不需要在自己的项目里手动执行 `npm install`。
+
+正常使用时不需要额外做预装配置，保留 `plugin` 配置项即可。
+
+首次使用时，OpenCode 可能需要把插件包写入自己的缓存或配置目录。如果自动安装因为权限或写入失败而报错，关闭 OpenCode 后，用管理员权限重新打开一次，再重试 `/session-analyzer` 即可。通常只需要这一次管理员启动，OpenCode 就能把这个包自动写进去。
+
 包根目录会导出 `SessionAnalyzerPlugin`，仓库中也保留了开发期使用的本地 `.opencode` 插件和命令文件。
+
+注意：npm 插件会提供 `session_analyzer` 工具，但 `/session-analyzer` slash command 仍需要在 OpenCode 配置中显式定义。仓库里的 `.opencode/commands/session-analyzer.md` 仅用于本仓库本地开发，不会在通过 npm 安装插件时自动注册。
+
+建议在命令模板里补上首次安装失败时的提示逻辑：
+
+````md
+Use the `session_analyzer` tool to analyze sessions for this workspace.
+
+Arguments: `$ARGUMENTS`
+
+Parse the arguments into this shape and call the tool exactly once unless the call fails and needs retry:
+
+```json
+{
+  "arguments": "$ARGUMENTS"
+}
+```
+
+After the tool returns, summarize in Chinese and keep it concise.
+
+If the tool call fails before analysis starts because `session_analyzer` is unavailable, the plugin package failed to install, or the error looks like a permission/write/install problem:
+- explain that OpenCode installs the npm plugin implicitly from the `plugin` config entry and users do not need to preinstall it manually
+- clearly state this is usually a first-run permission problem while OpenCode is trying to write the plugin package
+- tell the user to close OpenCode and reopen it once with administrator privileges, then retry `/session-analyzer`
+- say that opening OpenCode as administrator once is usually enough for it to write the package successfully
+- do not present the run as analyzer success in this case
+````
 
 ## 用法
 
@@ -108,6 +145,13 @@ TypeScript 检查命令：
 
 ```powershell
 node_modules\.bin\tsc -p tsconfig.json --noEmit
+```
+
+发布前本地验包：
+
+```powershell
+npm pack --dry-run
+npm pack
 ```
 
 ## 隐私

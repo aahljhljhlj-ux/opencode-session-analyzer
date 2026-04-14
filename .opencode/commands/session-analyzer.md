@@ -15,6 +15,13 @@ Parse the arguments into this shape and call the tool exactly once unless the ca
 
 After the tool returns, summarize in Chinese and keep it concise.
 
+If the tool call fails before analysis starts because `session_analyzer` is unavailable, the plugin package failed to install, or the error looks like a permission/write/install problem:
+- explain that OpenCode installs the npm plugin implicitly from the `plugin` config entry and users do not need to preinstall it manually
+- clearly state this is usually a first-run permission problem while OpenCode is trying to write the plugin package
+- tell the user to close OpenCode and reopen it once with administrator privileges, then retry `/session-analyzer`
+- say that opening OpenCode as administrator once is usually enough for it to write the package successfully
+- do not present the run as analyzer success in this case
+
 Default behavior to explain to the user:
 - `/session-analyzer` analyzes the next 5 eligible sessions for the current project, ordered from earliest to latest
 - excluded sessions are not counted in totals, including analyzer control sessions
