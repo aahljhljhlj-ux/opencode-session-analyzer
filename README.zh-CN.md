@@ -4,6 +4,8 @@
 
 这是一个 OpenCode 插件，用于分析历史 session，为用户提供建议，旨在优化项目内或全局的AGENTS.md记忆文件。
 
+本项目并非由 OpenCode 团队开发，不是 OpenCode 官方项目，也与 OpenCode 团队不存在隶属或关联关系。
+
 本功能由用户显式触发分析，不进行隐藏的后台分析，也不单独维护自己的 API key。LLM 分析直接复用用户当前 OpenCode 环境中已经配置好的 provider 和 model。
 
 

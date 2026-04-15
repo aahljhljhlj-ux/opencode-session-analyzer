@@ -4,6 +4,8 @@
 
 An OpenCode plugin for analyzing historical sessions and providing suggestions for users, aimed at improving project-level or global AGENTS.md memory files.
 
+This project is not developed by the OpenCode team, is not an official OpenCode project, and has no affiliation with the OpenCode team.
+
 This project is focused on explicit, user-triggered analysis. It does not run hidden background analysis by default, and it does not maintain its own API keys. LLM-powered analysis uses the provider and model configuration already available in the user's OpenCode environment.
 
 ## Quick Start
