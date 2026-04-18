@@ -1,6 +1,6 @@
 {
   "name": "opencode-session-analyzer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An OpenCode plugin for analyzing historical sessions and writing stable JSON artifacts.",
   "license": "MIT",
   "type": "module",

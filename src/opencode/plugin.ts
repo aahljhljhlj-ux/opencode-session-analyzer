@@ -1,21 +1,12 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { createSessionAnalyzerTool } from "./tool"
 
-export const SessionAnalyzerPlugin: Plugin = async ({ client, directory }) => {
-  await client.app.log({
-    body: {
-      service: "session-analyzer",
-      level: "info",
-      message: "Session analyzer plugin initialized",
-      extra: {
-        directory,
-      },
-    },
-  })
-
+export const SessionAnalyzerPlugin: Plugin = async ({ client: _client, directory: _directory }) => {
+  // Avoid client requests during plugin bootstrap. Newer OpenCode versions can
+  // still be initializing the local server while project plugins are loading.
   return {
     tool: {
-      session_analyzer: createSessionAnalyzerTool(client),
+      session_analyzer: createSessionAnalyzerTool(_client),
     },
   }
 }
